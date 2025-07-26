@@ -1,0 +1,483 @@
+{
+  "name": "Automated Threat Intelligence Reporting with n8n, VirusTotal, and Splunk",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        192
+      ],
+      "id": "cb299983-f9c0-4da6-bcbb-b6febcb8acf4",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "curlImport": "",
+        "httpVariantWarning": "",
+        "method": "GET",
+        "url": "=https://www.virustotal.com/api/v3/ip_addresses/{{$json[\"ip\"]}}",
+        "": "",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "virusTotalApi",
+        "provideSslCertificates": false,
+        "sendQuery": false,
+        "sendHeaders": false,
+        "sendBody": false,
+        "options": {},
+        "infoMessage": ""
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        512,
+        288
+      ],
+      "id": "7fbefcbf-b06d-4d8c-b555-5c97cd15b9eb",
+      "name": "VirusTotal HTTP Request",
+      "extendsCredential": "virusTotalApi",
+      "credentials": {
+        "virusTotalApi": {
+          "id": "Br1i1YsxTMcYYf6q",
+          "name": "VirusTotal account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "curlImport": "",
+        "httpVariantWarning": "",
+        "method": "GET",
+        "url": "={{\"https://www.virustotal.com/api/v3/ip_addresses/\" + $json.data.id}}",
+        "": "",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "virusTotalApi",
+        "provideSslCertificates": false,
+        "sendQuery": false,
+        "sendHeaders": false,
+        "sendBody": false,
+        "options": {},
+        "infoMessage": ""
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        848,
+        -256
+      ],
+      "id": "9c13d323-8cd4-46e8-bbdf-de3db2259a57",
+      "name": "VirusTotal HTTP Request1",
+      "extendsCredential": "virusTotalApi",
+      "credentials": {
+        "virusTotalApi": {
+          "id": "Br1i1YsxTMcYYf6q",
+          "name": "VirusTotal account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "da34212c-78c0-4ba6-8256-0fef4a82f84b",
+              "leftValue": "={{ $json.ip_scan_results.data.attributes.last_analysis_stats.malicious }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            },
+            {
+              "id": "4ef89662-e86c-4b86-b5d2-440be21acfc7",
+              "leftValue": "={{ $json.host_scan_results.data.attributes.last_analysis_stats.malicious }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1520,
+        -208
+      ],
+      "id": "595a3f29-0758-443b-a346-2a2fc5ab3116",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get all the malicious items that came through the 'true' path\nconst maliciousItems = $input.all();\n\n// If for some reason no items came through, create an empty report\nif (maliciousItems.length === 0) {\n  return [{ json: { report: '' } }];\n}\n\n// Start building the HTML report table\nlet htmlReport = `\n  <h1><font color=\"red\">Automated Threat Report</font></h1>\n  <p>The following indicators were flagged as malicious by VirusTotal.</p>\n  <table border=\"1\" cellpadding=\"5\" cellspacing=\"0\" style=\"border-collapse: collapse; width: 100%;\">\n    <tr style=\"background-color: #f2f2f2;\">\n      <th>IP Address</th>\n      <th>IP Detections</th>\n      <th>Hostname</th>\n      <th>Host Detections</th>\n      <th>Link</th>\n    </tr>\n`;\n\n// Loop through each malicious item and add its data to the table\nfor (const item of maliciousItems) {\n  // These will now be defined because of our new Edit Fields node\n  const ip = item.json.ip;\n  const host = item.json.host;\n  \n  // Get stats safely from the new structured fields, providing 0 if data is missing\n  const ipStats = item.json.ip_scan_results.data.attributes.last_analysis_stats;\n  const ipMaliciousCount = ipStats ? ipStats.malicious : 0;\n  \n  const hostStats = item.json.host_scan_results.data.attributes.last_analysis_stats;\n  const hostMaliciousCount = hostStats ? hostStats.malicious : 0;\n\n  // Create a link to the more suspicious of the two\n  const link = ipMaliciousCount >= hostMaliciousCount \n    ? `https://www.virustotal.com/gui/ip-address/${ip}` \n    : `https://www.virustotal.com/gui/domain/${host}`;\n  \n  htmlReport += `\n    <tr>\n      <td>${ip}</td>\n      <td style=\"color: ${ipMaliciousCount > 0 ? 'red' : 'green'}; font-weight: bold;\">${ipMaliciousCount}</td>\n      <td>${host}</td>\n      <td style=\"color: ${hostMaliciousCount > 0 ? 'red' : 'green'}; font-weight: bold;\">${hostMaliciousCount}</td>\n      <td><a href=\"${link}\">View Report</a></td>\n    </tr>\n  `;\n}\n\n// Close the table\nhtmlReport += `</table>`;\n\n// Return the final report as a single object\nreturn [{\n  json: {\n    report: htmlReport,\n    malicious_count: maliciousItems.length\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2192,
+        -112
+      ],
+      "id": "cd4fe628-9aa2-4f7f-b3f7-0d9e8741fbcf",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "272b9749-1e26-4e07-bb8a-b3c2fdc3a925",
+              "leftValue": "={{ $json.report }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1520,
+        528
+      ],
+      "id": "d7ad127e-90bc-4aee-948d-56c886afe82c",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "sendTo": "720819205023@hit.edu.in",
+        "subject": "=Threat Report: {{ $json.malicious_count }} Malicious Indicators Found",
+        "message": "={{ $json.report }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2224,
+        512
+      ],
+      "id": "36ec3007-681d-49b9-8d54-424dc69f43de",
+      "name": "Send a message",
+      "webhookId": "a34dcbf0-de28-408b-82ba-6c6181dde7ed",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "S5piyHytWsrOsFeP",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// This code simulates reading your CSV file.\n// It creates one item for each row in your logs.csv data.\n\nconst csvData = `ip,host\n8.8.8.8,example.com\n1.1.1.1,gooddomain.com\n45.227.253.55,maliciousdomain.com\n185.220.101.1,evilsite.net\n23.129.64.130,anothermalicious.com\n192.168.1.1,n8n.io\n104.16.132.229,cloudflare.com\n142.250.190.78,google.com\n151.101.1.69,stackoverflow.com\n13.107.21.200,github.com\n185.100.87.202,blacklisteddomain.xyz\n185.220.100.254,tor-exit-node.org\n45.153.160.133,phishingpage.site\n185.220.102.244,malware-c2.com\n185.220.102.246,cryptominer.net\n185.220.102.247,botnetcommand.org\n185.220.102.248,exploitkit.com\n185.220.102.249,maliciousupdate.net\n185.220.102.250,stealerhost.ru\n185.220.102.251,ddos-botnet.com\n185.220.102.252,maliciousvpn.net\n185.220.102.253,spamdomain.info\n185.220.102.254,scamhost.biz\n45.153.160.140,malicious-redirect.com\n45.153.160.141,adwarehost.org\n45.153.160.142,maliciousproxy.net\n45.153.160.143,infectedsite.co\n45.153.160.144,maliciousmail.com\n45.153.160.145,phishinglogin.net\n45.153.160.146,maliciousbanking.com\n45.153.160.147,maliciouscloud.net\n45.153.160.148,maliciouscdn.com\n45.153.160.149,maliciousapi.io\n103.89.89.35,35.89.89.103.in-addr.arpa\n92.118.39.29,aservice.com\n185.191.207.24,serv4all.com\n198.54.117.201,1337x.to\n5.188.87.58,adservice.pro\n146.70.158.156,zscalertwo.net\n205.185.115.211,ciustb.com\n141.98.8.12,files.zip\n89.117.57.11,go.essentialgatortop.com`;\n\n// This part of the code parses the text above into items.\n// You don't need to change this part.\nconst lines = csvData.split('\\n');\nconst header = lines.shift().split(',');\nconst items = lines.map(line => {\n  const values = line.split(',');\n  const item = {};\n  item[header[0]] = values[0];\n  item[header[1]] = values[1];\n  return { json: item };\n});\n\nreturn items;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        288,
+        -224
+      ],
+      "id": "3ac7ecfd-036e-4da4-920e-38a1968d6362",
+      "name": "Code1"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "82084c71-28e2-4981-8787-96b89bb04f54",
+              "name": "ip",
+              "value": "={{ $node[\"Code1\"].json.ip }}",
+              "type": "string"
+            },
+            {
+              "id": "2f0bae88-6a75-4e25-bb39-1334abbe5dbb",
+              "name": "host",
+              "value": "={{ $node[\"Code1\"].json.host }}",
+              "type": "string"
+            },
+            {
+              "id": "21240fd3-bc37-46f4-a8a5-affd6f59e18a",
+              "name": "ip_scan_results",
+              "value": "={{ $node[\"VirusTotal HTTP Request\"].json }}",
+              "type": "object"
+            },
+            {
+              "id": "4ddc3f03-5e63-4aa5-81a4-7b23cfabf9fb",
+              "name": "host_scan_results",
+              "value": "={{ $json }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1104,
+        -32
+      ],
+      "id": "1d8bdcad-e5df-45ee-bc4c-8f9d9420698e",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "content": "here we start execute flow",
+        "height": 320,
+        "width": 352
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -128,
+        96
+      ],
+      "typeVersion": 1,
+      "id": "8495e6e2-5fca-46e0-b055-b0c9c5982ef8",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "Code1 (The Data Source)\nPurpose: To provide the initial list of logs (IP address and hostname pairs).\nDetails: This node simulates getting logs from Splunk. It creates a list of items, where each item is a JSON object like { \"ip\": \"8.8.8.8\", \"host\": \"example.com\" }. The rest of the workflow will process each of these items one by one.",
+        "height": 352,
+        "width": 432
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        112,
+        -416
+      ],
+      "typeVersion": 1,
+      "id": "18b025a3-9180-4f8e-8177-faf52dd9f31f",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "through the api we use get request for ip address to find malicious or not",
+        "height": 256,
+        "width": 432
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        352,
+        192
+      ],
+      "typeVersion": 1,
+      "id": "217d2e3c-347a-466d-966f-08229464c6f1",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "here same did but get req used for host addrs",
+        "height": 192,
+        "width": 304
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        752,
+        -304
+      ],
+      "typeVersion": 1,
+      "id": "dd8f003b-42d9-4091-a2fc-f6fa601a11ac",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "content": "Send a message (The Notification)\nPurpose: To send the final threat report to an analyst or security team.\nDetails: This node takes the final data item. It uses expressions in the Subject and Body fields to insert the malicious_count and the HTML report. It then sends the formatted email.",
+        "height": 240,
+        "width": 496
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        2032,
+        368
+      ],
+      "typeVersion": 1,
+      "id": "8c60a099-140a-4d18-a49d-90af74fd6937",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "content": "If1 (The Safety Check)\nPurpose: To prevent the workflow from sending an empty email if no threats were found.\nDetails: It checks the single item coming from the Code node. If the report field is not empty, it allows the item to proceed. If the report is empty (meaning no threats were found), it stops the item, and no email is sent.",
+        "height": 256,
+        "width": 448
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1504,
+        368
+      ],
+      "typeVersion": 1,
+      "id": "bdb79af6-07e0-4a4d-b4d2-52f8083aba28",
+      "name": "Sticky Note5"
+    },
+    {
+      "parameters": {
+        "content": "Code (Report Generation)\nPurpose: To take all the malicious items and build a single HTML email report.\nDetails: This node only receives items that were flagged as malicious. It loops through all of them and constructs an HTML table. It then outputs a single item that contains two pieces of data: the final report (as an HTML string) and the malicious_count.",
+        "height": 288,
+        "width": 528
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1936,
+        -288
+      ],
+      "typeVersion": 1,
+      "id": "c17783ab-72cd-4f2a-9d63-04c012afa332",
+      "name": "Sticky Note6"
+    },
+    {
+      "parameters": {
+        "content": "If (The Filter)\nPurpose: To separate the malicious indicators from the clean ones.\nDetails: It checks each item coming from the Edit Fields node. If the malicious detection count for the IP OR the host is greater than 0, the item is sent down the true path. Otherwise, it is sent down the false path (where it is ignored).",
+        "height": 256,
+        "width": 496
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1264,
+        -336
+      ],
+      "typeVersion": 1,
+      "id": "79cd4b3b-dde3-4502-9e67-597ca736beb3",
+      "name": "Sticky Note7"
+    },
+    {
+      "parameters": {
+        "content": "Edit Fields (Data Cleanup & Structuring)\nPurpose: To create one clean, easy-to-use data object from all the information we've gathered.\nDetails: This node takes the combined data from the Merge node and organizes it.\nIt reaches back to the Code1 node to get the original ip and host.\nIt pulls in the ip_scan_results from the merged data.\nIt pulls in the host_scan_results from the merged data.\nThe output is a single, perfectly structured item containing everything needed for the next steps.",
+        "height": 272,
+        "width": 624
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        816,
+        64
+      ],
+      "typeVersion": 1,
+      "id": "26809cdb-0651-47d7-91d9-276e8033ece5",
+      "name": "Sticky Note8"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Code1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VirusTotal HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "VirusTotal HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VirusTotal HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code1": {
+      "main": [
+        [
+          {
+            "node": "VirusTotal HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "e6358202-b676-4ab3-852b-9a3729246d2b",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "1b83eabfe198f661dc2824cfa516f0d57859b70b6d2d4663df93bb481d2b2dc8"
+  },
+  "id": "xq9jWshp2LUM5ZcB",
+  "tags": []
+}
